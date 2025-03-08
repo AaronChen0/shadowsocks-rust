@@ -29,12 +29,10 @@ jobs:
       - if: ${{ runner.os == 'Windows' }}
         uses: ilammy/setup-nasm@v1
       - if: ${{ matrix.platform == 'ubuntu-latest' }}
-        run: sudo apt install libtinfo6
-      - if: ${{ matrix.platform == 'ubuntu-latest' }}
         name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v2
         with:
-          version: "18"
+          version: "19"
       - name: Install Rust
         run: |
           rustup set profile minimal
