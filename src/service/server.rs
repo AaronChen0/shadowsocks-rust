@@ -188,27 +188,6 @@ pub fn define_command_line_options(mut app: Command) -> Command {
             );
     }
 
-    #[cfg(unix)]
-    {
-        app = app
-            .arg(
-                Arg::new("DAEMONIZE")
-                    .short('d')
-                    .long("daemonize")
-                    .action(ArgAction::SetTrue)
-                    .help("Daemonize"),
-            )
-            .arg(
-                Arg::new("DAEMONIZE_PID_PATH")
-                    .long("daemonize-pid")
-                    .num_args(1)
-                    .action(ArgAction::Set)
-                    .value_parser(clap::value_parser!(PathBuf))
-                    .value_hint(ValueHint::FilePath)
-                    .help("File path to store daemonized process's PID"),
-            );
-    }
-
     #[cfg(all(unix, not(target_os = "android")))]
     {
         app = app.arg(
@@ -337,10 +316,7 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
                         // If method doesn't need a key (none, plain), then we can leave it empty
                         String::new()
                     } else {
-                        match crate::password::read_server_password(svr_addr) {
-                            Ok(pwd) => pwd,
-                            Err(..) => panic!("`password` is required for server {svr_addr}"),
-                        }
+                        panic!("`password` is required for server {svr_addr}")
                     }
                 }
             };
@@ -497,12 +473,6 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         config
             .check_integrity()
             .map_err(|err| ShadowsocksError::LoadConfigFailure(format!("config integrity check failed, {err}")))?;
-
-        #[cfg(unix)]
-        if matches.get_flag("DAEMONIZE") || matches.get_raw("DAEMONIZE_PID_PATH").is_some() {
-            use crate::daemonize;
-            daemonize::daemonize(matches.get_one::<PathBuf>("DAEMONIZE_PID_PATH"));
-        }
 
         #[cfg(unix)]
         if let Some(uname) = matches.get_one::<String>("USER") {

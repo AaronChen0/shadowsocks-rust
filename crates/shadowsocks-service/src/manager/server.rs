@@ -431,9 +431,6 @@ impl Manager {
         child_command
             .arg("-c")
             .arg(&config_file_path)
-            .arg("--daemonize")
-            .arg("--daemonize-pid")
-            .arg(&pid_path)
             .arg("--manager-addr")
             .arg(&manager_addr);
 

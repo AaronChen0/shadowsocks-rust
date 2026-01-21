@@ -8,7 +8,6 @@ use std::{
 };
 
 use clap::ArgMatches;
-use directories::ProjectDirs;
 use serde::Deserialize;
 
 /// Default configuration file path
@@ -30,50 +29,6 @@ pub fn get_default_config_path(config_file: &str) -> Option<PathBuf> {
             if relative_path.exists() {
                 return Some(relative_path);
             }
-        }
-    }
-
-    // System standard directories
-    if let Some(project_dirs) = ProjectDirs::from("org", "shadowsocks", "shadowsocks-rust") {
-        // Linux: $XDG_CONFIG_HOME/shadowsocks-rust/config.json
-        //        $HOME/.config/shadowsocks-rust/config.json
-        // macOS: $HOME/Library/Application Support/org.shadowsocks.shadowsocks-rust/config.json
-        // Windows: {FOLDERID_RoamingAppData}/shadowsocks/shadowsocks-rust/config/config.json
-
-        let mut config_path = project_dirs.config_dir().to_path_buf();
-        for filename in &config_files {
-            config_path.push(filename);
-            if config_path.exists() {
-                return Some(config_path);
-            }
-            config_path.pop();
-        }
-    }
-
-    // UNIX systems, XDG Base Directory
-    // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
-    #[cfg(unix)]
-    {
-        let base_directories = xdg::BaseDirectories::with_prefix("shadowsocks-rust");
-        // $XDG_CONFIG_HOME/shadowsocks-rust/config.json
-        // for dir in $XDG_CONFIG_DIRS; $dir/shadowsocks-rust/config.json
-        for filename in &config_files {
-            if let Some(config_path) = base_directories.find_config_file(filename) {
-                return Some(config_path);
-            }
-        }
-    }
-
-    // UNIX global configuration file
-    #[cfg(unix)]
-    {
-        let mut global_config_path = PathBuf::from("/etc/shadowsocks-rust");
-        for filename in &config_files {
-            global_config_path.push(filename);
-            if global_config_path.exists() {
-                return Some(global_config_path.to_path_buf());
-            }
-            global_config_path.pop();
         }
     }
 

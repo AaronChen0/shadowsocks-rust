@@ -11,13 +11,11 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     str,
-    sync::LazyLock,
 };
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use iprange::IpRange;
 use log::{trace, warn};
-use regex::bytes::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 
 use shadowsocks::{context::Context, relay::socks5::Address};
 
@@ -38,7 +36,6 @@ pub enum Mode {
 struct Rules {
     ipv4: IpRange<Ipv4Net>,
     ipv6: IpRange<Ipv6Net>,
-    rule_regex: RegexSet,
     rule_set: HashSet<String>,
     rule_tree: SubDomainsTree,
 }
@@ -47,26 +44,11 @@ impl fmt::Debug for Rules {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Rules {{ ipv4: {:?}, ipv6: {:?}, rule_regex: [",
+            "Rules {{ ipv4: {:?}, ipv6: {:?}, rule_set: [",
             self.ipv4, self.ipv6
         )?;
 
         let max_len = 2;
-        let has_more = self.rule_regex.len() > max_len;
-
-        for (idx, r) in self.rule_regex.patterns().iter().take(max_len).enumerate() {
-            if idx > 0 {
-                f.write_str(", ")?;
-            }
-            f.write_str(r)?;
-        }
-
-        if has_more {
-            f.write_str(", ...")?;
-        }
-
-        write!(f, "], rule_set: [")?;
-
         let has_more = self.rule_set.len() > max_len;
         for (idx, r) in self.rule_set.iter().take(max_len).enumerate() {
             if idx > 0 {
@@ -88,7 +70,6 @@ impl Rules {
     fn new(
         mut ipv4: IpRange<Ipv4Net>,
         mut ipv6: IpRange<Ipv6Net>,
-        rule_regex: RegexSet,
         rule_set: HashSet<String>,
         rule_tree: SubDomainsTree,
     ) -> Self {
@@ -99,18 +80,8 @@ impl Rules {
         Self {
             ipv4,
             ipv6,
-            rule_regex,
             rule_set,
             rule_tree,
-        }
-    }
-
-    /// Check if the specified address matches these rules
-    #[allow(dead_code)]
-    fn check_address_matched(&self, addr: &Address) -> bool {
-        match *addr {
-            Address::SocketAddress(ref saddr) => self.check_ip_matched(&saddr.ip()),
-            Address::DomainNameAddress(ref domain, ..) => self.check_host_matched(domain),
         }
     }
 
@@ -142,7 +113,7 @@ impl Rules {
     /// Check if the specified ASCII host matches any rules
     fn check_host_matched(&self, host: &str) -> bool {
         let host = host.trim_end_matches('.'); // FQDN, removes the last `.`
-        self.rule_set.contains(host) || self.rule_tree.contains(host) || self.rule_regex.is_match(host.as_bytes())
+        self.rule_set.contains(host) || self.rule_tree.contains(host)
     }
 
     /// Check if there are no rules for IP addresses
@@ -152,7 +123,7 @@ impl Rules {
 
     /// Check if there are no rules for domain names
     fn is_host_empty(&self) -> bool {
-        self.rule_set.is_empty() && self.rule_tree.is_empty() && self.rule_regex.is_empty()
+        self.rule_set.is_empty() && self.rule_tree.is_empty()
     }
 }
 
@@ -160,7 +131,6 @@ struct ParsingRules {
     name: &'static str,
     ipv4: IpRange<Ipv4Net>,
     ipv6: IpRange<Ipv6Net>,
-    rules_regex: Vec<String>,
     rules_set: HashSet<String>,
     rules_tree: SubDomainsTree,
 }
@@ -171,7 +141,6 @@ impl ParsingRules {
             name,
             ipv4: IpRange::new(),
             ipv6: IpRange::new(),
-            rules_regex: Vec::new(),
             rules_set: HashSet::new(),
             rules_tree: SubDomainsTree::new(),
         }
@@ -187,45 +156,6 @@ impl ParsingRules {
         let rule = rule.into();
         trace!("IPV6-RULE {}", rule);
         self.ipv6.add(rule);
-    }
-
-    fn add_regex_rule(&mut self, mut rule: String) {
-        static TREE_SET_RULE_EQUIV: LazyLock<Regex> = LazyLock::new(|| {
-            RegexBuilder::new(
-                r#"^(?:(?:\((?:\?:)?\^\|\\\.\)|(?:\^\.(?:\+|\*))?\\\.)((?:[\w-]+(?:\\\.)?)+)|\^((?:[\w-]+(?:\\\.)?)+))\$?$"#,
-            )
-            .unicode(false)
-            .build()
-            .unwrap()
-        });
-
-        if let Some(caps) = TREE_SET_RULE_EQUIV.captures(rule.as_bytes()) {
-            if let Some(tree_rule) = caps.get(1) {
-                if let Ok(tree_rule) = str::from_utf8(tree_rule.as_bytes()) {
-                    let tree_rule = tree_rule.replace("\\.", ".");
-                    if self.add_tree_rule_inner(&tree_rule).is_ok() {
-                        trace!("REGEX-RULE {} => TREE-RULE {}", rule, tree_rule);
-                        return;
-                    }
-                }
-            } else if let Some(set_rule) = caps.get(2)
-                && let Ok(set_rule) = str::from_utf8(set_rule.as_bytes())
-            {
-                let set_rule = set_rule.replace("\\.", ".");
-                if self.add_set_rule_inner(&set_rule).is_ok() {
-                    trace!("REGEX-RULE {} => SET-RULE {}", rule, set_rule);
-                    return;
-                }
-            }
-        }
-
-        trace!("REGEX-RULE {}", rule);
-
-        rule.make_ascii_lowercase();
-
-        // Handle it as a normal REGEX
-        // FIXME: If this line is not a valid regex, how can we know without actually compile it?
-        self.rules_regex.push(rule);
     }
 
     #[inline]
@@ -263,20 +193,10 @@ impl ParsingRules {
         }
     }
 
-    fn compile_regex(name: &'static str, regex_rules: Vec<String>) -> io::Result<RegexSet> {
-        const REGEX_SIZE_LIMIT: usize = usize::MAX;
-        RegexSetBuilder::new(regex_rules)
-            .size_limit(REGEX_SIZE_LIMIT)
-            .unicode(false)
-            .build()
-            .map_err(|err| Error::other(format!("{name} regex error: {err}")))
-    }
-
     fn into_rules(self) -> io::Result<Rules> {
         Ok(Rules::new(
             self.ipv4,
             self.ipv6,
-            Self::compile_regex(self.name, self.rules_regex)?,
             self.rules_set,
             self.rules_tree,
         ))
@@ -447,7 +367,6 @@ impl AccessControl {
                                     curr.add_ipv6_rule(v6);
                                 }
                                 Err(..) => {
-                                    curr.add_regex_rule(line.to_owned());
                                 }
                             }
                         }

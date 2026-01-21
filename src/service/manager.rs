@@ -158,45 +158,6 @@ pub fn define_command_line_options(mut app: Command) -> Command {
             );
     }
 
-    #[cfg(unix)]
-    {
-        app = app
-            .arg(
-                Arg::new("DAEMONIZE")
-                    .short('d')
-                    .long("daemonize")
-                    .action(ArgAction::SetTrue)
-                    .help("Daemonize"),
-            )
-            .arg(
-                Arg::new("DAEMONIZE_PID_PATH")
-                    .long("daemonize-pid")
-                    .num_args(1)
-                    .action(ArgAction::Set)
-                    .value_parser(clap::value_parser!(PathBuf))
-                    .value_hint(ValueHint::FilePath)
-                    .help("File path to store daemonized process's PID"),
-            )
-            .arg(
-                Arg::new("MANAGER_SERVER_MODE")
-                    .long("manager-server-mode")
-                    .num_args(1)
-                    .action(ArgAction::Set)
-                    .value_parser(vparser::parse_manager_server_mode)
-                    // .possible_values(["builtin", "standalone"])
-                    .help("Servers mode: builtin (default) or standalone"),
-            )
-            .arg(
-                Arg::new("MANAGER_SERVER_WORKING_DIRECTORY")
-                    .long("manager-server-working-directory")
-                    .num_args(1)
-                    .action(ArgAction::Set)
-                    .value_parser(clap::value_parser!(PathBuf))
-                    .value_hint(ValueHint::DirPath)
-                    .help("Folder for putting servers' configuration and pid files, default is current directory"),
-            );
-    }
-
     #[cfg(all(unix, not(target_os = "android")))]
     {
         app = app.arg(
@@ -472,12 +433,6 @@ pub fn create(matches: &ArgMatches) -> ShadowsocksResult<(Runtime, impl Future<O
         config
             .check_integrity()
             .map_err(|err| ShadowsocksError::LoadConfigFailure(format!("config integrity check failed, {err}")))?;
-
-        #[cfg(unix)]
-        if matches.get_flag("DAEMONIZE") || matches.get_raw("DAEMONIZE_PID_PATH").is_some() {
-            use crate::daemonize;
-            daemonize::daemonize(matches.get_one::<PathBuf>("DAEMONIZE_PID_PATH"));
-        }
 
         #[cfg(unix)]
         if let Some(uname) = matches.get_one::<String>("USER") {
